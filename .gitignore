@@ -1,0 +1,24 @@
+# 依赖
+node_modules/
+.pnpm-store/
+
+# 本地运行时产物
+shots/
+test/fixture/
+test/.fixture-selfcheck/
+*.bak-*
+cordis.patch.yml.bak-*
+
+# 审计报告（本地一次性产物，不入库）
+report.txt
+market-readme.md
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.log
+
+# 发布前的本地打包
+*.tgz

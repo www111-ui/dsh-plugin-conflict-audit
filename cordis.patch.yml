@@ -1,0 +1,6 @@
+# dsh-plugin-conflict-audit bundle patch
+# 往 profile 的插件层插入一行。id 取名 conflict-audit，
+# 刻意避开 blender-modeling / dsh-cad / dsh-market 等既有行 id 的命名风格。
+- insert:
+    - id: conflict-audit
+      name: 'dsh-plugin-conflict-audit'
