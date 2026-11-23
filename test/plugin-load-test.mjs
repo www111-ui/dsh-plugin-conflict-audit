@@ -270,6 +270,75 @@ export function apply(ctx) {
          'active 条目不被误报');
     }
 
+    console.log('\n悬空覆盖检测（patch 覆盖了组合结果里不存在的 row）');
+    {
+      // 造 profile：user patch 覆盖 row-a（真实存在）和 ghost-row（不存在）
+      const root = path.join(ROOT, 'test', '.fixture-dangling');
+      fs.rmSync(root, { recursive: true, force: true });
+      const prof = path.join(root, '.dsh', 'profiles', 'demo');
+      fs.mkdirSync(prof, { recursive: true });
+      fs.writeFileSync(path.join(prof, 'package.json'), JSON.stringify({
+        name: 'demo-profile', private: true, dependencies: {},
+        dsh: { profile: { bundles: [] } },
+      }), 'utf8');
+      fs.writeFileSync(path.join(prof, 'cordis.patch.yml'),
+        '- id: row-a\n  config: {}\n- id: ghost-row\n  config: {}\n', 'utf8');
+
+      const c = {
+        registered: [], effects: [],
+        tools: { register: (t) => { c.registered.push(t); } },
+        effect: (fn) => { c.effects.push(fn()); },
+        get: (n) => {
+          if (n === 'tools') return { definitions: () => [], register() {} };
+          if (n === 'loader') {
+            return {
+              entries: () => [{ id: 'row-a', options: { name: 'plugin-x' }, fiber: { state: 2 } }],
+              root: { data: [{ subgroup: { data: [{ id: 'row-a' }] } }] },
+              store: {},
+            };
+          }
+          return undefined;
+        },
+      };
+      mod.apply(c, {
+        startupSelfCheck: false,
+        home: root, dshHome: path.join(root, '.dsh'), profile: 'demo',
+      });
+      const outD = await c.registered[0].execute({ mode: 'both', includeInfo: true });
+      const dangling = outD.findings.find((f) => f.code === 'W_DANGLING_OVERRIDE');
+      ok(dangling !== undefined, '检出 ghost-row 为悬空覆盖',
+         `实际 codes: ${outD.findings.map((f) => f.code).join(',')}`);
+      ok(/ghost-row/.test(dangling?.detail ?? ''), '提示里点名 ghost-row');
+      ok(!/row-a/.test(dangling?.detail ?? ''), '已存在的 row-a 不被误报');
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+
+    console.log('\n修复建议（fix 字段）');
+    {
+      const ctx7 = {
+        registered: [], effects: [],
+        tools: { register: (t) => { ctx7.registered.push(t); } },
+        effect: (fn) => { ctx7.effects.push(fn()); },
+        get: (n) => {
+          if (n === 'tools') return { definitions: () => [], register() {} };
+          if (n === 'loader') {
+            return {
+              entries: () => [{ id: 'x', options: { name: 'dsh-pending-x', inject: ['ghostSvc'] }, fiber: { state: 0 } }],
+              root: { data: [] }, store: {},
+            };
+          }
+          return undefined;
+        },
+      };
+      mod.apply(ctx7, { startupSelfCheck: false });
+      const out7 = await ctx7.registered[0].execute({ mode: 'runtime', includeInfo: false });
+      const pending = out7.findings.find((f) => f.code === 'E_FIBER_PENDING_MISSING');
+      ok(pending !== undefined, '找到 pending 发现');
+      ok(typeof pending?.fix === 'string' && pending.fix.length > 10,
+         'pending 发现带可执行修复建议', pending?.fix?.slice(0, 40));
+      ok(/ghostSvc/.test(pending?.fix ?? ''), '修复建议里带出具体服务名');
+    }
+
     console.log('\n故障降级：tools.register 抛异常时');
     const ctx3 = {
       registered: [],

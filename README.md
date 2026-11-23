@@ -197,7 +197,7 @@ plugin_manager set_bundle { target: "dsh-plugin-conflict-audit", enabled: true }
 
 ```bash
 $NODE test/detector-test.mjs     # 审计逻辑（17 项）
-$NODE test/plugin-load-test.mjs  # cordis 外壳（46 项）
+$NODE test/plugin-load-test.mjs  # cordis 外壳（52 项）
 ```
 
 **这一步不能省。** 审计报告说「0 冲突」时有两种可能：真的干净，或者检测器是哑的。看报告无法区分。
@@ -224,12 +224,19 @@ $NODE test/plugin-load-test.mjs  # cordis 外壳（46 项）
 | `E_FIBER_PENDING_MISSING` | ERROR | fiber 永久 pending，缺依赖服务 |
 | `E_FIBER_FAILED` | ERROR | fiber 启动失败，带 _error 原文 |
 | `W_FIBER_PENDING` | WARN | pending 但依赖都在 |
+| `W_DANGLING_OVERRIDE` | WARN | 你的 patch 覆盖了组合结果里不存在的 row（空操作） |
 | `I_PARTIAL_LIVE` | INFO | 部分工具已注册（其余多为作用域挂载） |
 | `I_UNTRACKED_LIVE_TOOLS` | INFO | 运行时注册但静态侧未记录（多为核心工具） |
 | `I_DISABLED_ROWS` | INFO | 组合层里被禁用的行 |
 | `I_USER_PATCH_TARGETS` | INFO | 你的 patch 定制了插件行（设计如此，非冲突） |
 | `I_DISABLED` | INFO | 已安装但未启用 |
 | `I_SERVICE_UNVERIFIED` | INFO | 服务依赖不在已知核心名单（低置信） |
+
+## 修复建议（fix 字段）
+
+每条能给出处置的发现都带 `fix` 文本，直接告诉你下一步做什么：
+工具撞车 → 停用命令；fiber pending → 缺哪个服务、装谁或去掉谁；悬空覆盖 → 确认 bundle 还是删配置。
+给不出的（如纯信息项）就不给 —— 凑数的建议比没有更糟。
 
 ## 已知局限
 

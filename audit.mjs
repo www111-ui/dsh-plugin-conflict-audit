@@ -818,6 +818,9 @@ function audit(opts) {
       bundleCount: bundles.length,
       pluginCount: plugins.length,
       globalSkillCount: globalSkills.size,
+      // 用户 patch 覆盖 / 插入的 row id：运行时侧用它们做「悬空覆盖」判定
+      userPatchOverrides: [...userPatchParsed.overrides],
+      userPatchInserts: [...userPatchParsed.inserts],
     },
   };
 }

@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-conflict-audit",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "DSH 插件冲突审计：开机自检 + plugin_conflict_audit 工具。只读检测工具名撞车、patch 行 id 冲突、路由前缀重叠、技能重名、服务依赖缺失、版本兼容脱节。",
   "keywords": [
     "dsh",
