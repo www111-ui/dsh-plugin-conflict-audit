@@ -77,9 +77,41 @@ $NODE audit.mjs --profile xyz   # 指定 profile
 ```
 plugin_conflict_audit                      # agent 直接调
   profile           可选，默认取 DSH_PROFILE
+  mode              static / runtime / both（默认 both）
   includeInfo       是否含 INFO（默认 true）
   includeInventory  是否附带插件清单（默认 false，省 token）
 ```
+
+### 两种模式
+
+| 模式 | 数据来源 | 能看见 |
+| --- | --- | --- |
+| `static` | 磁盘上的源码与清单 | 工具名、路由、技能、版本声明、patch 行 |
+| `runtime` | 当前进程 `ctx.get()` | **真实工具注册表**、**服务是否存在**、组合后的插件行 |
+| `both`（默认） | 两者结合，运行时校正静态结论 | 全部 |
+
+运行时部分实测可用（DSH 0.2.2-rc.1）：
+
+```js
+ctx.get('tools').definitions()   // → 69 个真实注册的工具 id
+ctx.get('loader').root           // → 组合层里 213 行 {id, name, disabled}
+ctx.get(svc)                     // → 服务是否存在（实测 23 个存在 / 17 个不存在）
+```
+
+### 运行时带来什么
+
+1. **消除误报**：静态从代码里扒出的工具，未必真的注册了。实测 `dsh-aurabot-qq` 的 42 个
+   `qq_*` 工具、`whale-persona` 的 `memory` **全都不在全局注册表**（按 agent 作用域挂载）。
+   现在会标 `W_PLUGIN_TOOLS_NOT_LIVE`，而不是当成真工具参与冲突判定。
+2. **服务依赖从猜测变实测**：`I_SERVICE_UNVERIFIED` 升级为实测结论 —— 真不存在的报
+   `E_SERVICE_MISSING`，存在的直接不报。
+3. **组合行可见**：能看到最终装配出来的 213 行以及哪些被 `disabled`。
+
+### fiber 状态：拿不到（诚实交代）
+
+「装了但没反应」最准确的判据是 fiber 停在 `pending`。但实测表明：**fiber 只挂在最外层
+3 个 loader 条目上，按插件行读不到**。所以这个版本**不做** fiber 状态判定 —— 只能用
+「工具注册表里没有」间接推断，会标成 `W_PLUGIN_TOOLS_NOT_LIVE` 而不是断定 pending。
 
 输出里还会带 `bootAt`（上次开机自检完成时间）与 `bootError`（自检失败原因，成功时不出现）。
 宿主侧看不到 console 时，这两个字段是判断"自检到底跑没跑"的唯一途径。
@@ -165,6 +197,12 @@ $NODE test/plugin-load-test.mjs  # cordis 外壳（40 项）
 | `W_ROUTE_OVERLAP` | WARN | 路由前缀疑似重叠（启发式） |
 | `W_SKILL_COLLISION` | WARN | 技能名重名 |
 | `W_SCAN_CAPPED` | WARN | 文件数触顶，结果不完整 |
+| `W_PLUGIN_TOOLS_NOT_LIVE` | WARN | 静态有工具但运行时一个都没注册 |
+| `W_STATIC_ONLY_COLLISION` | WARN | 静态撞名但运行时未注册（低置信） |
+| `E_SERVICE_MISSING` | ERROR | 实测服务不存在 → 会导致 fiber pending |
+| `I_PARTIAL_LIVE` | INFO | 部分工具已注册（其余多为作用域挂载） |
+| `I_UNTRACKED_LIVE_TOOLS` | INFO | 运行时注册但静态侧未记录（多为核心工具） |
+| `I_DISABLED_ROWS` | INFO | 组合层里被禁用的行 |
 | `I_USER_PATCH_TARGETS` | INFO | 你的 patch 定制了插件行（设计如此，非冲突） |
 | `I_DISABLED` | INFO | 已安装但未启用 |
 | `I_SERVICE_UNVERIFIED` | INFO | 服务依赖不在已知核心名单（低置信） |

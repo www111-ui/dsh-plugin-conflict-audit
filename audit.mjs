@@ -511,7 +511,10 @@ function audit(opts) {
       pkg,
       tools: [],
       routes: [],
+      patchesInserted: [],
       injects: [],
+      injectsClient: [],
+      injectsInternal: [],
       provides: [],
       patchIds: [],
       patchInserts: [],
@@ -549,6 +552,16 @@ function audit(opts) {
       }
     }
 
+    // 入口文件：只有它导出的 inject 才代表「插件级」服务依赖。
+    // 子模块（如 dsh-ops 的 lib/components/tui/index.js）声明的 inject 是内部组件
+    // 的可选依赖，缺失只会让该组件 pending，不应报成插件缺依赖。
+    const mainField = pkg.main
+      ?? (typeof pkg.exports === 'string' ? pkg.exports : pkg.exports?.['.'])
+      ?? 'index.js';
+    const mainRel = (typeof mainField === 'string' ? mainField : (mainField?.default ?? 'index.js'))
+      .replace(/^\.\//, '');
+    const entryFile = path.resolve(dir, mainRel);
+
     // ── 3c. 扫描自有代码（排除 node_modules）──
     const walkRes = walk(dir, {
       maxDepth: MAX_WALK_DEPTH,
@@ -561,7 +574,9 @@ function audit(opts) {
     }
     const toolMap = new Map();
     const routeSet = new Set();
-    const injectSet = new Set();
+    const injectSet = new Set();        // 服务端 inject（参与服务存在性判定）
+    const injectClientSet = new Set();  // 客户端 inject（浏览器侧，服务名空间不同，不参与判定）
+    const injectInternalSet = new Set(); // 子组件 inject（可选依赖，只做提示）
     const provideSet = new Set();
     const skillSet = new Set();
     let dynamicHint = null;
@@ -597,13 +612,31 @@ function audit(opts) {
         if (m !== null && !/['"]\//.test(m[0])) dynamicHint = m[0].slice(0, 60);
       }
       for (const r of extractRoutes(text)) routeSet.add(r);
-      for (const s of extractServiceList(text, 'inject')) injectSet.add(s);
+      // 判断文件属于服务端还是浏览器端。
+      // dsh-ops 的 lib/client.js 里 inject 的是 slots / locale / tuiPanels / remote，
+      // 这些是浏览器侧服务名，在宿主里根本不存在 —— 混在一起会误报「依赖缺失」。
+      const rel = path.relative(dir, file).replace(/\\/g, '/');
+      const isClientSide =
+        /(^|\/)(client|ui|web|browser)(\/|\.|$)/i.test(rel) ||
+        /(^|\/)client\.[cm]?[jt]s$/i.test(rel);
+
+      const injectsHere = extractServiceList(text, 'inject');
+      if (path.resolve(file) !== entryFile) {
+        // 子组件 inject：单独归类，不参与插件级依赖判定
+        for (const s of injectsHere) injectInternalSet.add(s);
+      } else if (isClientSide) {
+        for (const s of injectsHere) injectClientSet.add(s);
+      } else {
+        for (const s of injectsHere) injectSet.add(s);
+      }
       for (const s of extractServiceList(text, 'provide')) provideSet.add(s);
     }
 
     entry.tools = [...toolMap.entries()].map(([name, confidence]) => ({ name, confidence }));
     entry.routes = [...routeSet];
     entry.injects = [...injectSet];
+    entry.injectsClient = [...injectClientSet];
+    entry.injectsInternal = [...injectInternalSet];
     entry.provides = [...provideSet];
     entry.skills = [...skillSet];
     entry.scanned = walkRes.files.length;
