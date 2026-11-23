@@ -216,6 +216,60 @@ export function apply(ctx) {
       ok(out4?.bootError === undefined, '自检成功时无 bootError');
     }
 
+    console.log('\nfiber 状态检测（构造 pending / failed 条目）');
+    {
+      const mkCtx = (entries) => {
+        const c = {
+          registered: [],
+          effects: [],
+          tools: { register: (t) => { c.registered.push(t); } },
+          effect: (fn) => { c.effects.push(fn()); },
+          get: (n) => {
+            if (n === 'tools') return { definitions: () => [{ name: 'some_tool' }], register() {} };
+            if (n === 'loader') return { entries: () => entries };
+            return undefined;
+          },
+        };
+        return c;
+      };
+
+      // state: 0=pending 2=active 3=failed（cordis FiberState 数字枚举）
+      const pendingEntry = {
+        id: 'p-fake',
+        options: { name: 'dsh-fake-pending', inject: ['ghostService'] },
+        fiber: { state: 0 },
+      };
+      const ctxP = mkCtx([pendingEntry]);
+      mod.apply(ctxP, { startupSelfCheck: false });
+      const outP = await ctxP.registered[0].execute({ mode: 'runtime', includeInfo: false });
+      const codesP = outP.findings.map((f) => f.code);
+      ok(codesP.includes('E_FIBER_PENDING_MISSING'),
+         'pending + 缺服务 → E_FIBER_PENDING_MISSING', `实际: ${codesP.join(',')}`);
+      ok(outP.findings.some((f) => f.code === 'E_FIBER_PENDING_MISSING' && /ghostService/.test(f.title)),
+         '提示里带出缺失的服务名');
+      ok(outP.fiberPending === 1 && outP.fiberFailed === 0,
+         `统计正确 (pending=${outP.fiberPending}, failed=${outP.fiberFailed})`);
+
+      const failedEntry = {
+        id: 'f-fake',
+        options: { name: 'dsh-fake-failed' },
+        fiber: { state: 3, _error: new Error('service "shared" has been registered at A') },
+      };
+      const ctxF = mkCtx([failedEntry]);
+      mod.apply(ctxF, { startupSelfCheck: false });
+      const outF = await ctxF.registered[0].execute({ mode: 'runtime', includeInfo: false });
+      ok(outF.findings.some((f) => f.code === 'E_FIBER_FAILED'), 'failed → E_FIBER_FAILED');
+      ok(outF.findings.some((f) => /registered at A/.test(f.detail ?? '')),
+         '失败原因从 fiber._error 带出来');
+
+      // active 不应报
+      const ctxA = mkCtx([{ id: 'a-fake', options: { name: 'dsh-fake-active' }, fiber: { state: 2 } }]);
+      mod.apply(ctxA, { startupSelfCheck: false });
+      const outA = await ctxA.registered[0].execute({ mode: 'runtime', includeInfo: false });
+      ok(!outA.findings.some((f) => f.code.startsWith('E_FIBER') || f.code.startsWith('W_FIBER')),
+         'active 条目不被误报');
+    }
+
     console.log('\n故障降级：tools.register 抛异常时');
     const ctx3 = {
       registered: [],

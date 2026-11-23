@@ -107,11 +107,32 @@ ctx.get(svc)                     // → 服务是否存在（实测 23 个存在
    `E_SERVICE_MISSING`，存在的直接不报。
 3. **组合行可见**：能看到最终装配出来的 213 行以及哪些被 `disabled`。
 
-### fiber 状态：拿不到（诚实交代）
+### fiber 状态：能读了（这是"装了没反应"的判据）
 
-「装了但没反应」最准确的判据是 fiber 停在 `pending`。但实测表明：**fiber 只挂在最外层
-3 个 loader 条目上，按插件行读不到**。所以这个版本**不做** fiber 状态判定 —— 只能用
-「工具注册表里没有」间接推断，会标成 `W_PLUGIN_TOOLS_NOT_LIVE` 而不是断定 pending。
+```
+loader.entries()        → 可迭代的条目树，每条带 entry.fiber
+entry.fiber.state       → 数字枚举：0 pending / 1 loading / 2 active / 3 failed / 5 unloading
+entry.fiber._error      → 失败原因（如 service "x" has been registered at ...）
+entry.options.inject    → 该条目声明的依赖，用 ctx.get() 逐个验证是否存在
+```
+
+踩过的两个坑，记下来免得再犯：
+
+1. **`loader.entries()` 返回的是可迭代对象，不是普通对象**。一开始用 `Object.keys()` 看是空的，
+   误判成"不可用"就放弃了。
+2. **`fiber.state` 是数字，不是字符串**。去找 `.status` 永远找不到。
+
+现在能报出：
+
+| 代码 | 级别 | 含义 |
+| --- | --- | --- |
+| `E_FIBER_PENDING_MISSING` | ERROR | fiber 永远 pending + `inject` 的服务无人提供 → 插件静默不工作 |
+| `E_FIBER_FAILED` | ERROR | fiber failed，带出 `_error` 原文 |
+| `W_FIBER_PENDING` | WARN | pending，但依赖都在（可能是加载顺序/内部 await 卡住） |
+
+**对抗性验证过**：造一个 `inject: ['thisServiceDoesNotExistXyz']` 的插件装进 profile，
+审计报出 `E_FIBER_PENDING_MISSING: dsh-broken-probe: 永远 pending —— 缺依赖服务 [thisServiceDoesNotExistXyz]`，
+与宿主自己的诊断（`pending (waiting for service: thisServiceDoesNotExistXyz)`）一致。
 
 输出里还会带 `bootAt`（上次开机自检完成时间）与 `bootError`（自检失败原因，成功时不出现）。
 宿主侧看不到 console 时，这两个字段是判断"自检到底跑没跑"的唯一途径。
@@ -176,7 +197,7 @@ plugin_manager set_bundle { target: "dsh-plugin-conflict-audit", enabled: true }
 
 ```bash
 $NODE test/detector-test.mjs     # 审计逻辑（17 项）
-$NODE test/plugin-load-test.mjs  # cordis 外壳（40 项）
+$NODE test/plugin-load-test.mjs  # cordis 外壳（46 项）
 ```
 
 **这一步不能省。** 审计报告说「0 冲突」时有两种可能：真的干净，或者检测器是哑的。看报告无法区分。
@@ -200,6 +221,9 @@ $NODE test/plugin-load-test.mjs  # cordis 外壳（40 项）
 | `W_PLUGIN_TOOLS_NOT_LIVE` | WARN | 静态有工具但运行时一个都没注册 |
 | `W_STATIC_ONLY_COLLISION` | WARN | 静态撞名但运行时未注册（低置信） |
 | `E_SERVICE_MISSING` | ERROR | 实测服务不存在 → 会导致 fiber pending |
+| `E_FIBER_PENDING_MISSING` | ERROR | fiber 永久 pending，缺依赖服务 |
+| `E_FIBER_FAILED` | ERROR | fiber 启动失败，带 _error 原文 |
+| `W_FIBER_PENDING` | WARN | pending 但依赖都在 |
 | `I_PARTIAL_LIVE` | INFO | 部分工具已注册（其余多为作用域挂载） |
 | `I_UNTRACKED_LIVE_TOOLS` | INFO | 运行时注册但静态侧未记录（多为核心工具） |
 | `I_DISABLED_ROWS` | INFO | 组合层里被禁用的行 |
